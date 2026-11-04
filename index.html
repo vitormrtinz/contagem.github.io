@@ -67,16 +67,45 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--hivis);outline-
 #report{font-family:ui-monospace,Menlo,monospace;font-size:.82rem;min-height:200px;width:100%;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:8px;padding:10px}
 .msg{font-size:.85rem;color:var(--ok);min-height:1.2em}
 @media (prefers-reduced-motion:no-preference){.item{transition:border-color .15s}}
+.hdr{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.gear{font:inherit;font-size:.85rem;font-weight:600;padding:8px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;flex:none}
+.panel h2{font-family:var(--display);font-size:1.15rem;text-transform:uppercase;letter-spacing:.05em;margin:0}
+.fields{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+label.f{display:grid;gap:4px;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.save{width:100%;font-size:1.1rem;padding:16px}
+.status{font-size:.92rem;padding:10px 12px;border-radius:8px;background:var(--surface);border:1.5px solid var(--line)}
+.status.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.status.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.status.bad{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.cfg-hint{font-size:.88rem;color:var(--muted)}
 </style>
 </head>
 <body>
 
 
 <div class="wrap">
-  <header>
-    <h1>Conferência Lafelli</h1>
-    <div class="sub">Digite a quantidade da nota e vá contando o material físico.</div>
+  <header class="hdr">
+    <div><h1>Conferência Lafelli</h1>
+    <div class="sub">Digite a quantidade da nota e vá contando o material físico.</div></div>
+    <button class="gear" id="btnCfg" type="button" aria-expanded="false">Configurar</button>
   </header>
+
+  <section class="panel" id="cfg" hidden>
+    <h2>Ligação com a planilha</h2>
+    <label class="f">Endereço do Apps Script<input id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off"></label>
+    <label class="f">Senha<input id="cfgToken" type="password" autocomplete="off"></label>
+    <label class="f">Seu nome (conferente)<input id="cfgNome" autocomplete="name"></label>
+    <div class="actions"><button class="btn pri" id="cfgSalvar" type="button">Salvar e testar</button><button class="btn" id="cfgFechar" type="button">Fechar</button></div>
+    <div class="cfg-hint" id="cfgMsg">Esses dados ficam guardados só neste aparelho.</div>
+  </section>
+
+  <section class="panel">
+    <div class="fields">
+      <label class="f">Data<input id="fData" type="date"></label>
+      <label class="f">Cliente<input id="fCliente" list="listaClientes" placeholder="Escolha ou digite" autocomplete="off"></label>
+    </div>
+    <datalist id="listaClientes"></datalist>
+  </section>
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="coleta" aria-selected="true">Coleta <span class="badge" id="b-coleta" hidden></span></button>
@@ -87,11 +116,13 @@ input:focus-visible,button:focus-visible{outline:3px solid var(--hivis);outline-
 
   <div id="list" style="display:grid;gap:8px"></div>
 
+  <button class="btn pri save" id="salvar" type="button">Salvar na planilha</button>
+  <div class="status" id="status" hidden aria-live="polite"></div>
   <div class="actions">
-    <button class="btn pri" id="gerar" type="button">Gerar resumo</button>
+    <button class="btn" id="gerar" type="button">Gerar resumo</button>
     <button class="btn danger" id="limpar" type="button">Nova conferência</button>
   </div>
-  <div class="confirm" id="confirmBox" hidden>Apagar coleta e entrega e começar do zero?
+  <div class="confirm" id="confirmBox" hidden><span id="confirmTxt"></span>
     <button class="btn danger" id="simLimpar" type="button">Sim, apagar</button>
     <button class="btn" id="naoLimpar" type="button">Cancelar</button>
   </div>
@@ -108,10 +139,13 @@ const ITENS=["Avental com manga","Avental sem manga","Avental cintura","Blusão 
 const KEY="lafelli-conf-v2";
 // Botão de soma rápida por aba (índice segue ITENS; 0 = sem botão)
 const BULK={coleta:[10,10,10,10,10,10,10,10],entrega:[5,5,5,4,0,10,10,10]};
-const blank=()=>({tab:"coleta",coleta:ITENS.map(()=>({nf:"",c:0})),entrega:ITENS.map(()=>({nf:"",c:0}))});
+const blank=()=>({id:novoId(),data:hoje(),cliente:"",rev:0,salvo:false,jaEnviado:false,tab:"coleta",coleta:ITENS.map(()=>({nf:"",c:0})),entrega:ITENS.map(()=>({nf:"",c:0}))});
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))||blank()}catch(e){S=blank()}
 if(!S.coleta||S.coleta.length!==ITENS.length)S=blank();
+if(!S.id)S.id=novoId();if(!S.data)S.data=hoje();if(S.cliente==null)S.cliente="";
+function novoId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function hoje(){const d=new Date(),z=n=>String(n).padStart(2,"0");return`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const $=id=>document.getElementById(id);
 const pc=n=>n===1?"peça":"peças";
@@ -157,7 +191,7 @@ function refreshItem(i){
   const r=S[S.tab][i],el=$("it"+i),[s,t]=status(r);
   el.className="item "+s;el.querySelector(".st").textContent=t;
   const[tn,tc]=totals();$("tot").innerHTML=`<span>Total nota: ${tn}</span><span>Contado: ${tc}</span>`;
-  renderAlert();renderBadges();save();
+  renderAlert();renderBadges();touch();
 }
 $("list").addEventListener("click",e=>{const b=e.target.closest("button[data-d]");if(!b)return;
   const i=+b.dataset.i,r=S[S.tab][i];r.c=Math.max(0,r.c+ +b.dataset.d);
@@ -170,8 +204,8 @@ function setTab(t){S.tab=t;document.querySelectorAll(".tab").forEach(x=>x.setAtt
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>setTab(t.dataset.tab)));
 
 function report(){
-  const d=new Date().toLocaleDateString("pt-BR");
-  let o=`CONFERÊNCIA LAFELLI EPI'S — ${d}\n`;
+  const d=S.data?S.data.split("-").reverse().join("/"):"";
+  let o=`CONFERÊNCIA LAFELLI EPI'S — ${d}\nCliente: ${S.cliente||"-"}\n`;
   [["coleta","COLETA"],["entrega","ENTREGA"]].forEach(([k,n])=>{
     const rows=S[k];if(!rows.some(r=>r.nf!==""||r.c>0))return;
     o+=`\n${n}\n`;
@@ -185,9 +219,91 @@ $("gerar").addEventListener("click",()=>{$("report").value=report();$("repBox").
 $("copiar").addEventListener("click",()=>{const t=$("report");
   const fb=()=>{t.focus();t.select();$("msg").textContent="Texto selecionado. Use Copiar do seu celular."};
   try{navigator.clipboard.writeText(t.value).then(()=>$("msg").textContent="Copiado. Cole no WhatsApp ou e-mail.",fb)}catch(e){fb()}});
-$("limpar").addEventListener("click",()=>$("confirmBox").hidden=false);
+$("limpar").addEventListener("click",()=>{$("confirmTxt").textContent=(!S.salvo&&temDados())?"Esta conferência ainda não foi salva na planilha. Apagar mesmo assim?":"Apagar coleta e entrega e começar do zero?";$("confirmBox").hidden=false});
 $("naoLimpar").addEventListener("click",()=>$("confirmBox").hidden=true);
-$("simLimpar").addEventListener("click",()=>{S=blank();save();$("confirmBox").hidden=true;$("repBox").hidden=true;setTab("coleta")});
+$("simLimpar").addEventListener("click",()=>{S=blank();save();$("fData").value=S.data;$("fCliente").value="";$("confirmBox").hidden=true;$("repBox").hidden=true;aviso("");btnSalvar();setTab("coleta")});
+
+// ===== Ligação com a planilha (Google Sheets via Apps Script) =====
+const CFGKEY="lafelli-config",FILAKEY="lafelli-fila",CLIKEY="lafelli-clientes";
+const ler=(k,f)=>{try{const v=JSON.parse(localStorage.getItem(k));return v??f}catch(e){return f}};
+const gravar=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+const esc=x=>String(x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let CFG=ler(CFGKEY,{url:"",token:"",nome:""});
+const configurado=()=>!!(CFG.url&&CFG.token);
+const temDados=()=>["coleta","entrega"].some(k=>S[k].some(r=>r.nf!==""||r.c>0));
+
+function touch(){S.salvo=false;S.rev=(S.rev||0)+1;save();btnSalvar()}
+function btnSalvar(){$("salvar").textContent=S.salvo?"Salvo na planilha ✓":(S.jaEnviado?"Atualizar na planilha":"Salvar na planilha")}
+function aviso(msg,kind){const el=$("status");el.hidden=!msg;el.className="status"+(kind?" "+kind:"");el.textContent=msg||""}
+
+$("fData").value=S.data;$("fCliente").value=S.cliente||"";
+$("fData").addEventListener("input",e=>{S.data=e.target.value;touch()});
+$("fCliente").addEventListener("input",e=>{S.cliente=e.target.value;touch()});
+
+function preencherClientes(l){$("listaClientes").innerHTML=(l||[]).map(c=>`<option value="${esc(c)}"></option>`).join("")}
+preencherClientes(ler(CLIKEY,[]));
+async function carregarClientes(){
+  const r=await fetch(CFG.url+"?acao=clientes&token="+encodeURIComponent(CFG.token));
+  const j=await r.json();if(!j.ok)throw new Error(j.erro||"erro desconhecido");
+  gravar(CLIKEY,j.clientes);preencherClientes(j.clientes);return j.clientes.length;
+}
+
+function montarEnvio(){
+  const linhas=[];
+  [["coleta","Coleta"],["entrega","Entrega"]].forEach(([k,n])=>S[k].forEach((r,i)=>{
+    if(r.nf===""&&r.c===0)return;
+    linhas.push({tipo:n,item:ITENS[i],nota:r.nf===""?"":+r.nf,contado:r.c,diferenca:r.nf===""?"":r.c-(+r.nf),situacao:status(r)[1]});
+  }));
+  return{id:S.id,rev:S.rev||0,data:S.data,cliente:S.cliente.trim(),conferente:CFG.nome||"",linhas};
+}
+
+let enviando=false;
+async function enviarFila(){
+  if(enviando||!configurado())return;
+  let fila=ler(FILAKEY,[]);if(!fila.length)return;
+  enviando=true;
+  try{
+    while(fila.length){
+      const p=fila[0];let j;
+      try{
+        const r=await fetch(CFG.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({...p,token:CFG.token})});
+        j=await r.json();
+      }catch(e){aviso(`Sem conexão com a planilha. ${fila.length===1?"1 conferência guardada":fila.length+" conferências guardadas"} neste aparelho. O envio acontece sozinho quando a internet voltar.`,"warn");return}
+      if(!j.ok){aviso(`A planilha recusou o envio: ${j.erro||"erro desconhecido"}. Confira em Configurar.`,"bad");return}
+      fila.shift();gravar(FILAKEY,fila);
+      if(p.id===S.id&&p.rev===(S.rev||0)){S.salvo=true;S.jaEnviado=true;save();btnSalvar()}
+      else if(p.id===S.id){S.jaEnviado=true;save();btnSalvar()}
+    }
+    aviso(`Salvo na planilha às ${new Date().toTimeString().slice(0,5)}.`,"ok");
+  }finally{enviando=false}
+}
+
+$("salvar").addEventListener("click",()=>{
+  if(!configurado()){abrirCfg();aviso("Primeiro ligue o app à planilha: preencha o endereço e a senha em Configurar.","warn");return}
+  if(!S.cliente.trim()){aviso("Escolha o cliente antes de salvar.","bad");$("fCliente").focus();return}
+  if(!S.data){aviso("Preencha a data antes de salvar.","bad");return}
+  const p=montarEnvio();if(!p.linhas.length){aviso("Nenhum item preenchido ainda.","bad");return}
+  const fila=ler(FILAKEY,[]).filter(x=>x.id!==p.id);fila.push(p);gravar(FILAKEY,fila);
+  aviso("Enviando para a planilha…","");enviarFila();
+});
+
+function abrirCfg(){$("cfg").hidden=false;$("btnCfg").setAttribute("aria-expanded","true");$("cfgUrl").value=CFG.url;$("cfgToken").value=CFG.token;$("cfgNome").value=CFG.nome;$("cfg").scrollIntoView({behavior:"smooth"})}
+function fecharCfg(){$("cfg").hidden=true;$("btnCfg").setAttribute("aria-expanded","false")}
+$("btnCfg").addEventListener("click",()=>$("cfg").hidden?abrirCfg():fecharCfg());
+$("cfgFechar").addEventListener("click",fecharCfg);
+$("cfgSalvar").addEventListener("click",async()=>{
+  CFG={url:$("cfgUrl").value.trim(),token:$("cfgToken").value.trim(),nome:$("cfgNome").value.trim()};gravar(CFGKEY,CFG);
+  if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(CFG.url)){$("cfgMsg").textContent="O endereço precisa começar com https://script.google.com/ e terminar em /exec.";return}
+  if(!CFG.token){$("cfgMsg").textContent="Digite a senha definida no código da planilha.";return}
+  $("cfgMsg").textContent="Testando a ligação…";
+  try{const n=await carregarClientes();$("cfgMsg").textContent=`Ligado à planilha. ${n} cliente(s) carregado(s).`;enviarFila()}
+  catch(e){$("cfgMsg").textContent=`Não consegui falar com a planilha: ${e.message||"sem conexão"}.`}
+});
+
+window.addEventListener("online",enviarFila);
+btnSalvar();
+{const n=ler(FILAKEY,[]).length;if(n)aviso(`${n} conferência(s) aguardando envio para a planilha.`,"warn")}
+enviarFila();if(configurado())carregarClientes().catch(()=>{});
 
 setTab(S.tab);
 </script>
